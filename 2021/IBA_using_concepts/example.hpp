@@ -84,6 +84,11 @@ namespace using_inheritance
     struct feline : mammal, predator
     {};
 }
+namespace using_cpp11
+{
+    template <typename T, template <typename> class ... requirements_list>
+    using requirements_t = std::conjunction<requirements_list<T>...>;
+}
 namespace using_cpp17
 {
     template <typename T>
@@ -95,17 +100,13 @@ namespace using_contracts
 {
     template <typename T>
     concept animal = requires(T & value) {
-        { value.behave() };
+        value.behave();
     };
     template <typename T>
-    concept vertebrate = requires(const T & value) {
-        animal<T>;
-        { value.spine };
+    concept vertebrate = animal<T> && requires(const T & value) {
+        value.spine;
     };
-    template <typename T>
-    concept gendered = requires(const T & value) {
-        { value.gender };
-    };
+
     template <typename T, typename predator_type>
     concept prey = requires(T & value) {
         { value.hunted_by(std::declval<const predator_type&>()) };
@@ -118,38 +119,69 @@ namespace using_contracts
     };
 
     template <typename T>
-    concept is_iterable = requires(T value) {
+    concept gendered = requires(T) {
+        T::gender_value;
+    };
+    template <typename T>
+    concept female = gendered<T> && requires(T) {
+        std::is_enum_v<decltype(T::gender_value)>;
+        T::gender_value == decltype(T::gender_value)::female;
+    };
+
+    template <typename T>
+    concept iterable = requires(T value) {
         { value.begin() } -> std::same_as<decltype(value.end())>;
     };
 
     template <typename T>
-    concept mammal = requires(T & value) {
+    concept has_constant_temperature = requires(T & value) {
         { value.temperature } -> std::convertible_to<int>;
         std::is_const_v<decltype(std::declval<T&>().temperature)>;
-        { value.udders }
     };
+
+    template <typename T>
+    concept mammal = vertebrate<T>
+        && has_constant_temperature<T>
+        && gendered<T>
+        && requires(T & value) {
+        { not female<T> || (female<T> && value.udders -> iterable) }; // or std::array::size > 0
+        { value.breathe() };
+    };
+
+    template <class T, class prey_type>
+    concept feline = mammal<T> && predator<T, prey_type>;
+
+    // ---------- Impls
+
+    template <class T, class predator_type>
+    concept rodent = mammal<T> && prey<T, predator_type>;
 
     // todo : crtp -> gender_specific
 
-    struct mammal : vertebrate, gendered
+    struct cat
     {
-        const int temperature;
+        // gendered requirements ...
+        enum gender_type {male, female};
+        constexpr static auto gender_value = gender_type::male;
 
-        const auto has_udders()
-        {
-            return gender == gender_type::female;
-        } 
+        // animal requirements ...
+        void behave(){}
 
-        void breathe()
-        {
-            lungs.use();
-        }
+        // vertebrate requirements ...
+        struct spine_type{};
+        spine_type spine;
 
-    private:
-        struct lungs_type{ void use(){}; } lungs;
+        // predator requirements ...
+        template <rodent<cat> rodent_type>
+        void hunt(rodent_type &){}
+
+        // has_constant_temperature
+        const int temperature = 37;
+
+        // mammals requirements ...
+
     };
-    struct feline : mammal, predator
-    {};
+
 }
 
 
