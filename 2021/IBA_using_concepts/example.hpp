@@ -74,12 +74,13 @@ namespace using_contracts
     template <typename T, typename predator_type>
     concept prey = requires(T & value) {
         { value.hunted_by(std::declval<const predator_type&>()) };
-        { std::declval<predator_type&>().hunt(value) };
+        //{ std::declval<predator_type&>().hunt(value) };
     };
+
     template <typename T, typename prey_type>
     concept predator = requires(T & value) {
         { value.hunt(std::declval<prey_type&>()) };
-        { std::declval<prey_type&>().hunted_by(std::declval<const T &>()) };
+        //{ std::declval<prey_type&>().hunted_by(std::declval<const T &>()) };
     };
 
     template <typename T>
@@ -108,7 +109,10 @@ namespace using_contracts
         && has_constant_temperature<T>
         && gendered<T>
         && requires(T & value) {
-        { not female<T> || (female<T> && value.udders -> iterable) }; // or std::array::size > 0
+        {
+            not female<T> ||
+            (female<T> && requires { value.udders -> iterable; })
+        }; // or std::size | std::array::size > 0
         { value.breathe() };
     };
 
@@ -119,6 +123,27 @@ namespace using_contracts
 
     template <class T, class predator_type>
     concept rodent = mammal<T> && prey<T, predator_type>;
+
+    struct mouse
+    {
+        enum gender_type { unknown };
+        constexpr static auto gender_value = gender_type::unknown;
+
+        // animal requirements ...
+        void behave(){}
+
+        // vertebrate requirements ...
+        struct spine_type{};
+        spine_type spine;
+
+        // prey requirements ...
+        template <predator<mouse> predator_type>
+        void hunted_by(const predator_type &){}
+
+        // has_constant_temperature
+        const int temperature = 35;
+    };
+    // static_assert(rodent<mouse>);
 
     // todo : crtp -> gender_specific
 
@@ -136,14 +161,25 @@ namespace using_contracts
         spine_type spine;
 
         // predator requirements ...
-        template <rodent<cat> rodent_type>
-        void hunt(rodent_type &){}
+        // template <prey<cat> prey_type> // -> circular dependency
+        template <typename prey_type>
+        void hunt(prey_type &)
+        {
+            static_assert(prey<prey_type, cat>);
+        }
 
         // has_constant_temperature
         const int temperature = 37;
 
         // mammals requirements ...
+        void breathe(){}
 
     };
+    static_assert(feline<cat, mouse>);
 
+    template <feline<cat> feline_type>
+    void use_feline()
+    {
+
+    }
 }
