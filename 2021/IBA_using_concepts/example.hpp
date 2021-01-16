@@ -2,42 +2,6 @@
 #include <type_traits>
 #include <functional>
 
-// SFINAE, detection idiom, contracts
-//
-// Contract example : feline
-// - default constructible
-// - mammal
-//      Animal vertébré
-//          Animal
-//              êtres vivants
-//              hétérotrophes : se nourrissent de substances organiques
-//          vertebrate
-//              has_spine
-//      température constante
-//      respirant par des poumons
-//      [skipped] : système nerveux central développé
-//      les femelles portent des mamelles
-// - predator
-//      Hunt(prey)
-// - prey
-//      Hunted(predator)
-
-// Animal examples
-//  - spineless : mosquitos, molluscs (snails, ...)
-//  - Not feline : dogs
-//  - not const temperature : snakes
-//  - no udders : birds
-
-// Points :
-// - static polymorphism
-// - type erasure
-// - zero-cost abstration
-// - no tight coupling (classes, CMake targets, ...)
-//  - share contracts, not classes
-//  - no forward-declarations
-
-// todo : check perfs
-
 namespace using_inheritance
 {
     struct animal
@@ -182,37 +146,4 @@ namespace using_contracts
 
     };
 
-}
-
-
-namespace impl_1
-{
-    template <typename T>
-    using IsNotReference = typename std::enable_if<!std::is_reference<T>::value>::type;
-
-    template <typename T, typename = IsNotReference<T>>
-    void do_stuff(T && arg)
-    {}
-    void test()
-    {
-        do_stuff(int{42});
-        int i = 42;
-        // do_stuff(i); // error: no matching function for call to 'do_stuff(int&)'
-    }
-}
-namespace impl_2
-{
-    template <typename T>
-    struct IsNotReference : std::negation<std::is_reference<T>>{ };
-    template <typename T>
-    constexpr static auto IsNotReference_v = IsNotReference<T>::value;
-
-    template <typename T, typename = std::enable_if_t<IsNotReference_v<T>>>
-    void do_stuff(T && arg)
-    {}
-
-    // template< class, class = void>
-    // struct IsNotReference : std::false_type { };
-    //  template <class T>
-    // struct IsNotReference<T, std::void_t<typename T::type>> : std::true_type { };
 }
