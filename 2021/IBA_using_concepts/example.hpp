@@ -29,10 +29,14 @@ namespace using_contracts
     };
     template <typename T>
     concept female = gendered<T> && requires(T) {
-        T::gender_value == decltype(T::gender_value)::female;
+        { T::gender_value == decltype(T::gender_value)::female } -> std::convertible_to<bool>;
+        { std::conditional_t
+            <
+                T::gender_value == decltype(T::gender_value)::female,
+                std::true_type,
+                std::false_type
+            >{} } -> std::same_as<std::true_type>;
     };
-    template <typename T>
-    concept not_female = not female<T>;
 
     template <typename T>
     concept iterable = requires(T value) {
