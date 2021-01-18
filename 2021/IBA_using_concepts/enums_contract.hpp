@@ -16,83 +16,66 @@ namespace concepts
     concept not_female = gendered<T> && not female<T>;
 }
 
-namespace impl_1
-{
-    enum gender_type { male, female, unknown };
-    template <gender_type gender_value>
-    struct gender_specifications
-    {
-    };
-    template <>
-    struct gender_specifications<gender_type::female>
-    {
-    };
-}
-namespace impl_2
-{
-    template <typename T, typename T::gender_type gender_arg>
-    class gender_specifications
-    {
-        template <typename T::gender_type value>
-        struct impl
-        {
-            constexpr static auto gender_value = value;
-        };
-        template <>
-        struct impl<T::gender_type::female>
-        {
-            constexpr static auto gender_value = T::gender_type::female;
-        };
+template <typename, class = void>
+struct has_female_member : std::false_type { };
+template <typename T>
+struct has_female_member<T, std::void_t<decltype(T::female)>> : std::true_type { };
+template <typename T>
+constexpr static auto has_female_member_v = has_female_member<T>::value;
 
-    public:
-        using type = impl<gender_arg>;
-    };
-    template <typename T, typename T::gender_type gender_arg>
-    using gender_specifications_t = typename gender_specifications<T, gender_arg>::type; 
-}
-namespace impl_3
+template <
+    auto value,
+    typename = std::enable_if_t<std::is_enum_v<decltype(value)>>>
+constexpr static auto is_female_value = [](auto arg)
 {
-    template <auto gender_arg>
-    class gender_specifications
+    if constexpr (has_female_member_v<decltype(arg)>)
+        return value == decltype(arg)::female;
+    return false;
+}(value);
+
+template <auto arg>
+class gender_specifications
+{
+    template <auto gender_arg, typename = void>
+    struct impl
     {
-        using gender_arg_t = decltype(gender_arg);
-        static_assert(std::is_enum_v<gender_arg_t>);
-
-        template <gender_arg_t value>
-        struct impl
-        {
-            using gender_type = gender_arg_t;
-            constexpr static auto gender_value = gender_arg;
-        };
-        template <>
-        struct impl<gender_arg_t::female>
-        {
-            using gender_type = gender_arg_t;
-            constexpr static auto gender_value = gender_type::female;
-        };
-
-    public:
-        using type = impl<gender_arg>;
+        using gender_type = decltype(gender_arg);
+        static_assert(std::is_enum_v<gender_type>);
+        constexpr static auto gender_value = gender_arg;
     };
     template <auto gender_arg>
-    using gender_specifications_t = typename gender_specifications<gender_arg>::type;
-}
+    struct impl<gender_arg, std::enable_if_t<is_female_value<gender_arg>>>
+    {
+        using gender_type = decltype(gender_arg);
+        static_assert(std::is_enum_v<gender_type>);
+        constexpr static auto gender_value = gender_arg;
+    };
+public :
+    using type = impl<arg>;
+};
 
+template <auto gender_arg>
+using gender_specifications_t = typename gender_specifications<gender_arg>::type;
 
 enum gender_type { male, female, unknown };
-
 struct rat
 {
 };
 struct unicorn
 {
-    enum gender_type { female };
+    enum gender_type { hybrid };
 };
 
-template <class T, auto gender_value>
+template <
+    class T,
+    auto gender_value,
+    template <auto> typename gender_specifier = gender_specifications_t
+>
+    requires (not concepts::gendered<T>)
 auto animal_factory()
 {
-    struct type : T, impl_3::gender_specifications_t<gender_value>
+    static_assert(concepts::gendered<gender_specifier<gender_value>>);
+    struct type : T, gender_specifier<gender_value>
     {};
     static_assert(concepts::gendered<type>);
     return type{};
@@ -105,7 +88,10 @@ void test()
         static_assert(concepts::female<decltype(female_rat)>);
     }
     {
-        const auto female_rat = animal_factory<unicorn, unicorn::female>();
-        static_assert(concepts::female<decltype(female_rat)>);
+        const auto female_unicorn = animal_factory<unicorn, unicorn::hybrid>();
+        static_assert(not concepts::female<decltype(female_unicorn)>);
     }
 }
+
+
+
