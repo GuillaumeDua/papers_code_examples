@@ -83,10 +83,13 @@ enum gender_type { male, female, unknown };
 
 struct rat
 {
-    // enum gender_type { male, female, unknown };
+};
+struct unicorn
+{
+    enum gender_type { female };
 };
 
-template <class T, gender_type gender_value>
+template <class T, auto gender_value>
 auto animal_factory()
 {
     struct type : T, impl_3::gender_specifications_t<gender_value>
@@ -97,8 +100,12 @@ auto animal_factory()
 
 void test()
 {
-    const auto female_rat = animal_factory<rat, female>();
-    static_assert(concepts::female<decltype(female_rat)>);
+    {
+        const auto female_rat = animal_factory<rat, female>();
+        static_assert(concepts::female<decltype(female_rat)>);
+    }
+    {
+        const auto female_rat = animal_factory<unicorn, unicorn::female>();
+        static_assert(concepts::female<decltype(female_rat)>);
+    }
 }
-
-
