@@ -2,6 +2,14 @@
 #include <type_traits>
 #include <algorithm>
 
+namespace mp
+{
+    template <bool evaluation>
+    using if_t = std::conditional_t<evaluation, std::true_type, std::false_type>;
+
+    template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
+    template<class... Ts> overload(Ts...) -> overload<Ts...>;
+}
 namespace using_contracts::concepts
 {
     template <typename T>
@@ -24,18 +32,24 @@ namespace using_contracts::concepts
     template <typename T>
     concept gendered = requires(T value) {
         { std::is_enum_v<decltype(T::gender_value)> };
-        { T::gender_value } -> std::same_as<const typename T::gender_type>;
+        { std::decay_t<decltype(T::gender_value)>{} } -> std::same_as<typename T::gender_type>;
     };
     template <typename T>
     concept female = gendered<T> && requires(T) {
         { T::gender_value == decltype(T::gender_value)::female } -> std::convertible_to<bool>;
-        { std::conditional_t
-            <
-                T::gender_value == decltype(T::gender_value)::female,
-                std::true_type,
-                std::false_type
-            >{} } -> std::same_as<std::true_type>;
+        { mp::if_t<T::gender_value == decltype(T::gender_value)::female>{} } -> std::same_as<std::true_type>;
     };
+    template <typename T>
+    concept male = gendered<T> && requires(T) {
+        { T::gender_value == decltype(T::gender_value)::male } -> std::convertible_to<bool>;
+        { mp::if_t<T::gender_value == decltype(T::gender_value)::male>{} } -> std::same_as<std::true_type>;
+    };
+    template <typename T1, typename T2>
+    concept can_copulate =
+        gendered<T1> &&
+        gendered<T2> && 
+        ((male<T1> && female<T2>) || (female<T1> && male<T2>))
+    ;
 
     template <typename T>
     concept iterable = requires(T value) {
@@ -88,6 +102,11 @@ namespace using_contracts::traits
         return false;
     }(value);
 }
+
+#include <variant>
+#include <vector>
+#include <ranges>
+
 namespace using_contracts::sample
 {   // ---------- Impls
     template <auto arg>
@@ -108,22 +127,26 @@ namespace using_contracts::sample
             constexpr static auto gender_value = gender_arg;
         };
     public :
+        static_assert(std::is_enum_v<decltype(arg)>);
         using type = impl<arg>;
     };
     template <auto gender_arg>
     using gender_specifications_t = typename gender_specifications<gender_arg>::type;
 
     template <
-        class T,
+        class T_model,
         auto gender_value,
         template <auto> typename gender_specifier = gender_specifications_t
     >
-    requires (not concepts::gendered<T>)
+    requires
+        (not concepts::gendered<T_model>) &&
+        concepts::gendered<gender_specifier<gender_value>>
     auto animal_factory()
     {   // replace lambda in unevaluated context
-        static_assert(concepts::gendered<gender_specifier<gender_value>>);
-        struct type : T, gender_specifier<gender_value>
-        {};
+        struct type : T_model, gender_specifier<gender_value>
+        {
+            using model_type = T_model;   
+        };
         static_assert(concepts::gendered<type>);
         return type{};
     };
@@ -137,13 +160,13 @@ namespace using_contracts::sample
 
     struct mouse_model
     {
-        enum gender_type { male, female };
+        enum genders { male, female };
 
         // prey requirements ...
         template <typename predator_type>
         void hunted_by(const predator_type &)
         {
-            static_assert(concepts::prey_of<mouse_model, predator_type>);
+            static_assert(concepts::prey_of<decltype(*this), predator_type>);
         }
 
         // animal requirements ...
@@ -159,16 +182,16 @@ namespace using_contracts::sample
         const int temperature = 35;
     };
     using male_mouse = animal_type<mouse_model, mouse_model::male>;
+    static_assert(concepts::mammal<male_mouse>);
     using female_mouse = animal_type<mouse_model, mouse_model::female>;
+    static_assert(concepts::mammal<female_mouse>);
 
     struct cat_model
     {
         // gendered requirements ...
-        enum gender_type { male, female };
-
+        enum genders { male, female };
         // animal requirements ...
         void behave(){}
-
         // vertebrate requirements ...
         struct spine_type{};
         spine_type spine;
@@ -177,23 +200,24 @@ namespace using_contracts::sample
         template <typename prey_type>
         void hunt(prey_type &)
         {
-            static_assert(concepts::predator_of<cat_model, prey_type>);
+            static_assert(concepts::predator_of<decltype(*this), prey_type>);
         }
 
         // has_constant_temperature
         const int temperature = 37;
-
         // mammals requirements ...
         void breathe(){}
     };
     using male_cat = animal_type<cat_model, cat_model::male>;
+    static_assert(concepts::mammal<male_cat>);
     using female_cat = animal_type<cat_model, cat_model::female>;
+    static_assert(concepts::mammal<female_cat>);
 
     template <class feline_type>
         requires
-            concepts::predator_of<feline_type, male_mouse> &&
+            concepts::predator_of<feline_type, mouse_model> &&
             concepts::mammal<feline_type>
-    void hunt_male_mouse(feline_type & some_feline)
+    constexpr void hunt_male_mouse(feline_type & some_feline)
     {
         male_mouse some_male_mouse;
         static_assert(concepts::mammal<male_mouse>);
@@ -213,6 +237,57 @@ namespace using_contracts::sample
             static_assert(decltype(some_male_cat)::gender_value == cat_model::male);
             static_assert(not concepts::female<decltype(some_male_cat)>);
             hunt_male_mouse(some_male_cat);
+        }
+    }
+
+    template <concepts::animal ... Ts>
+    using Animal = std::variant<Ts...>;
+
+    template <typename T1, typename T2>
+    concept same_model = std::same_as<T1, T2>;
+
+    void simulation()
+    {
+        using animal_type = Animal<female_cat, male_cat, female_mouse, male_mouse>;
+        using AnimalsCollection = std::vector<animal_type>;
+
+        auto animals_collection = AnimalsCollection
+        {
+            female_cat{},
+            male_cat{},
+            female_mouse{},
+            male_mouse{}
+        };
+
+        const auto behaviors = mp::overload
+        {
+            []<concepts::animal T, concepts::animal U>(T&, U&)
+                requires
+                    same_model<T, U> &&
+                    concepts::can_copulate<T,U>
+            {
+                // copulate
+            },
+            []<concepts::animal T, concepts::animal U>(T & T_value, U & U_value)
+                requires
+                    concepts::predator_of<T,U> ||
+                    concepts::predator_of<U,T>
+            {
+                if constexpr (concepts::predator_of<T,U>)
+                    T_value.hunt(U_value);
+                if constexpr (concepts::predator_of<U, T>)
+                    U_value.hunt(T_value);
+            },
+            [](auto &, auto &){}
+        };
+        for (auto & animal_value : animals_collection)
+        {
+            for (auto & other_animal : animals_collection | std::views::filter([&animal_value](auto & rhs) {
+                return &animal_value != &rhs;
+            }))
+            {
+                std::visit(behaviors, animal_value, other_animal);
+            }
         }
     }
 }
