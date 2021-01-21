@@ -45,7 +45,10 @@ namespace using_contracts::concepts
         { mp::if_t<T::gender_value == decltype(T::gender_value)::male>{} } -> std::same_as<std::true_type>;
     };
     template <typename T1, typename T2>
+    concept same_species = std::same_as<typename T1::species_type, typename T2::species_type>;
+    template <typename T1, typename T2>
     concept can_copulate =
+        same_species<T1, T2> &&
         gendered<T1> &&
         gendered<T2> && 
         ((male<T1> && female<T2>) || (female<T1> && male<T2>))
@@ -103,10 +106,6 @@ namespace using_contracts::traits
     }(value);
 }
 
-#include <variant>
-#include <vector>
-#include <ranges>
-
 namespace using_contracts::sample
 {   // ---------- Impls
     template <auto arg>
@@ -134,18 +133,18 @@ namespace using_contracts::sample
     using gender_specifications_t = typename gender_specifications<gender_arg>::type;
 
     template <
-        class T_model,
+        class species,
         auto gender_value,
         template <auto> typename gender_specifier = gender_specifications_t
     >
     requires
-        (not concepts::gendered<T_model>) &&
+        (not concepts::gendered<species>) &&
         concepts::gendered<gender_specifier<gender_value>>
     auto animal_factory()
     {   // replace lambda in unevaluated context
-        struct type : T_model, gender_specifier<gender_value>
+        struct type : species, gender_specifier<gender_value>
         {
-            using model_type = T_model;   
+            using species_type = species;
         };
         static_assert(concepts::gendered<type>);
         return type{};
@@ -158,7 +157,7 @@ namespace using_contracts::sample
     requires (not concepts::gendered<T>)
     using animal_type = decltype(animal_factory<T, gender_value, gender_specifier>());
 
-    struct mouse_model
+    struct mouse_species
     {
         enum genders { male, female };
 
@@ -181,12 +180,12 @@ namespace using_contracts::sample
         // has_constant_temperature
         const int temperature = 35;
     };
-    using male_mouse = animal_type<mouse_model, mouse_model::male>;
+    using male_mouse = animal_type<mouse_species, mouse_species::male>;
     static_assert(concepts::mammal<male_mouse>);
-    using female_mouse = animal_type<mouse_model, mouse_model::female>;
+    using female_mouse = animal_type<mouse_species, mouse_species::female>;
     static_assert(concepts::mammal<female_mouse>);
 
-    struct cat_model
+    struct cat_species
     {
         // gendered requirements ...
         enum genders { male, female };
@@ -208,14 +207,14 @@ namespace using_contracts::sample
         // mammals requirements ...
         void breathe(){}
     };
-    using male_cat = animal_type<cat_model, cat_model::male>;
+    using male_cat = animal_type<cat_species, cat_species::male>;
     static_assert(concepts::mammal<male_cat>);
-    using female_cat = animal_type<cat_model, cat_model::female>;
+    using female_cat = animal_type<cat_species, cat_species::female>;
     static_assert(concepts::mammal<female_cat>);
 
     template <class feline_type>
         requires
-            concepts::predator_of<feline_type, mouse_model> &&
+            concepts::predator_of<feline_type, mouse_species> &&
             concepts::mammal<feline_type>
     constexpr void hunt_male_mouse(feline_type & some_feline)
     {
@@ -227,62 +226,65 @@ namespace using_contracts::sample
     void test()
     {
         {
-            auto some_female_cat = animal_factory<cat_model, cat_model::female>();
-            static_assert(decltype(some_female_cat)::gender_value == cat_model::female);
+            auto some_female_cat = animal_factory<cat_species, cat_species::female>();
+            static_assert(decltype(some_female_cat)::gender_value == cat_species::female);
             static_assert(concepts::female<decltype(some_female_cat)>);
             hunt_male_mouse(some_female_cat);
         }
         {
-            auto some_male_cat = animal_factory<cat_model, cat_model::male>();
-            static_assert(decltype(some_male_cat)::gender_value == cat_model::male);
+            auto some_male_cat = animal_factory<cat_species, cat_species::male>();
+            static_assert(decltype(some_male_cat)::gender_value == cat_species::male);
             static_assert(not concepts::female<decltype(some_male_cat)>);
             hunt_male_mouse(some_male_cat);
         }
     }
+}
 
-    template <concepts::animal ... Ts>
-    using Animal = std::variant<Ts...>;
+#include <variant>
+#include <array>
+#include <ranges>
 
-    template <typename T1, typename T2>
-    concept same_model = std::same_as<T1, T2>;
+#include <iostream>
+#include <typeinfo>
+namespace using_contracts::sample
+{
+    template <using_contracts::concepts::animal ... animal_type>
+    static constexpr auto animal_collection_v = std::array<std::variant<animal_type...>, sizeof...(animal_type)>{ animal_type{}...};
 
     void simulation()
     {
-        using animal_type = Animal<female_cat, male_cat, female_mouse, male_mouse>;
-        using AnimalsCollection = std::vector<animal_type>;
-
-        auto animals_collection = AnimalsCollection
-        {
-            female_cat{},
-            male_cat{},
-            female_mouse{},
-            male_mouse{}
-        };
+        auto animals_collection_value = animal_collection_v<female_cat, male_cat, female_mouse, male_mouse>;
 
         const auto behaviors = mp::overload
         {
             []<concepts::animal T, concepts::animal U>(T&, U&)
                 requires
-                    same_model<T, U> &&
                     concepts::can_copulate<T,U>
             {
                 // copulate
+                std::cout << "copulate :\n\t" << typeid(T).name() << "\nand\n\t" << typeid(U).name() << '\n';
             },
             []<concepts::animal T, concepts::animal U>(T & T_value, U & U_value)
                 requires
                     concepts::predator_of<T,U> ||
                     concepts::predator_of<U,T>
             {
+                std::cout << "hunt :\n\t" << typeid(T).name() << "\nand\n\t" << typeid(U).name() << '\n';
+
                 if constexpr (concepts::predator_of<T,U>)
                     T_value.hunt(U_value);
                 if constexpr (concepts::predator_of<U, T>)
                     U_value.hunt(T_value);
             },
-            [](auto &, auto &){}
+            [](auto & arg1, auto & arg2)
+            {
+                // ignore each others
+                std::cout << "ignore :\n\t" << typeid(arg1).name() << "\nand\n\t" << typeid(arg2).name() << '\n';
+            }
         };
-        for (auto & animal_value : animals_collection)
+        for (auto & animal_value : animals_collection_value)
         {
-            for (auto & other_animal : animals_collection | std::views::filter([&animal_value](auto & rhs) {
+            for (auto & other_animal : animals_collection_value | std::views::filter([&animal_value](auto & rhs) {
                 return &animal_value != &rhs;
             }))
             {
@@ -293,3 +295,8 @@ namespace using_contracts::sample
 }
 
 // todo : CRTP on models
+
+auto main() -> int
+{
+    using_contracts::sample::simulation();
+}
