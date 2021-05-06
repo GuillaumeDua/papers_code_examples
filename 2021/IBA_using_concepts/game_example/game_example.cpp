@@ -242,6 +242,7 @@ namespace flexible_concepts::cpp20
 {
     // check constexper value equality in concepts
     template <typename T>
+    // = (T::difficulty_value == decltype(T::difficulty_value)::legendary)>{})
     concept is_legendary = requires(T) {
         // BAD : T::difficulty_value == decltype(T::difficulty_value)::legendary;
         { if_t<(T::difficulty_value == decltype(T::difficulty_value)::legendary)>{} } -> std::same_as<std::true_type>;
@@ -317,6 +318,49 @@ namespace flexible_concepts::cpp20::usage
 
 // using accessor = detect A or B => A::smthg, B::smthg
 // or if-constexpr
+
+namespace function_contract
+{
+    struct monster {
+        using hp_type = unsigned int;
+        hp_type hp{0};
+    };
+
+    namespace cpp20
+    {
+        template <typename F>
+        concept monster_generator = requires(F) {
+            { std::declval<F>()(monster::hp_type{}) } -> std::convertible_to<monster>;
+        };
+    }
+    namespace cpp17
+    {
+        template <typename F, typename = void>
+        struct is_monster_generator : std::false_type{};
+        template <typename F>
+        struct is_monster_generator<F, std::void_t<decltype(std::declval<F>()(monster::hp_type{}))>>
+        : std::is_convertible<decltype(std::declval<F>()(monster::hp_type{})), monster>
+        {};
+    }
+
+    namespace usage
+    {
+        auto generate_monster(monster::hp_type hp_value)
+        {
+            struct impl : monster{} value{hp_value};
+            return value;
+        }
+        constexpr auto monster_generator = [](monster::hp_type hp_value){
+            return monster{ hp_value };
+        };
+
+        static_assert(cpp20::monster_generator<decltype(generate_monster)>);
+        static_assert(cpp20::monster_generator<decltype(monster_generator)>);
+
+        static_assert(cpp17::is_monster_generator<decltype(generate_monster)>::value);
+        static_assert(cpp17::is_monster_generator<decltype(monster_generator)>::value);
+    }
+}
 
 #include <iostream>
 auto main() -> int
